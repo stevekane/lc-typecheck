@@ -559,6 +559,6 @@ This is sugar for the following:
 
   (λf:(N → N).(f 5) + (f 6)  λn:N.recnat n 1 (λx:N.λy:N.(x + 1) * y))
 
-An aside about mathematical let expressions:
-
-let x:E in F
+In order to replace Maybe with Either we need to initially make the swap 
+and deal with the errors. Let's start with the stupidest possible Either which is 
+Either () E

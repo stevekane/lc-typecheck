@@ -79,20 +79,23 @@ instance Show T where
 
 
 -- TYPECHECKING
-when b a = if b then Just a else Nothing
+when b a = if b then Right a else Left ()
 
-typeOf env (Var v)              = Map.lookup v env
-typeOf env (Bool b)             = Just Boolean
-typeOf env (Nat b)              = Just NaturalNumber
-typeOf env (Fst (Product τ τ')) = Just $ Arrow (Product τ τ') τ
-typeOf env (Snd (Product τ τ')) = Just $ Arrow (Product τ τ') τ'
-typeOf env (UnaryOp Negate)     = Just $ Arrow NaturalNumber NaturalNumber
-typeOf env (UnaryOp Not)        = Just $ Arrow Boolean Boolean
-typeOf env (BinaryOp Add)       = Just $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
-typeOf env (BinaryOp Sub)       = Just $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
-typeOf env (BinaryOp Mul)       = Just $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
-typeOf env (BinaryOp And)       = Just $ Arrow Boolean (Arrow Boolean Boolean)
-typeOf env (BinaryOp Or)        = Just $ Arrow Boolean (Arrow Boolean Boolean)
+-- TODO: Could probably make this more elegant mapping from Maybe -> Either
+typeOf env (Var v)              = case Map.lookup v env of
+  (Just τ) -> Right τ
+  _        -> Left ()
+typeOf env (Bool b)             = return Boolean
+typeOf env (Nat b)              = return NaturalNumber
+typeOf env (Fst (Product τ τ')) = return $ Arrow (Product τ τ') τ
+typeOf env (Snd (Product τ τ')) = return $ Arrow (Product τ τ') τ'
+typeOf env (UnaryOp Negate)     = return $ Arrow NaturalNumber NaturalNumber
+typeOf env (UnaryOp Not)        = return $ Arrow Boolean Boolean
+typeOf env (BinaryOp Add)       = return $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
+typeOf env (BinaryOp Sub)       = return $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
+typeOf env (BinaryOp Mul)       = return $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
+typeOf env (BinaryOp And)       = return $ Arrow Boolean (Arrow Boolean Boolean)
+typeOf env (BinaryOp Or)        = return $ Arrow Boolean (Arrow Boolean Boolean)
 
 typeOf env (RecNat n e f) = do
   NaturalNumber                        <- typeOf env n  
@@ -115,12 +118,12 @@ typeOf env (Inr r (Sum τ τ')) = do
   when (etr == τ') (Sum τ τ')
 
 typeOf env (Partial b l) = case (b, typeOf env l) of
-  (Add, Just NaturalNumber) -> Just $ Arrow NaturalNumber NaturalNumber
-  (Sub, Just NaturalNumber) -> Just $ Arrow NaturalNumber NaturalNumber
-  (Mul, Just NaturalNumber) -> Just $ Arrow NaturalNumber NaturalNumber
-  (And, Just Boolean)       -> Just $ Arrow Boolean Boolean
-  (Or,  Just Boolean)       -> Just $ Arrow Boolean Boolean
-  _                         -> Nothing
+  (Add, Right NaturalNumber) -> return $ Arrow NaturalNumber NaturalNumber
+  (Sub, Right NaturalNumber) -> return $ Arrow NaturalNumber NaturalNumber
+  (Mul, Right NaturalNumber) -> return $ Arrow NaturalNumber NaturalNumber
+  (And, Right Boolean)       -> return $ Arrow Boolean Boolean
+  (Or,  Right Boolean)       -> return $ Arrow Boolean Boolean
+  _                          -> Left ()
 
 typeOf env (Case l r (Arrow (Sum τ τ') σ)) = do
   let etl = Arrow τ σ
@@ -144,7 +147,7 @@ typeOf env (Pair l r) = do
   τ' <- typeOf env r
   return (Product τ τ')
 
-typeOf env _ = Nothing
+typeOf env _ = Left ()
 
 
 
@@ -222,14 +225,24 @@ instance (Monad m, Alternative m) => Alternative (Parser m) where
   empty = empty
   a <|> b = Parser $ \s -> parse a s <|> parse b s
 
+instance Alternative (Either a) where
+  empty          = empty
+  (Left _) <|> r = r
+  l        <|> r = l
+
+instance MonadFail (Either a) where
+  fail s = empty
+
+
 mkpair a b  = (a,b)
 parse (Parser p) = p
 readChar c = read [ c ]
 
 -- Generic parsers
 pif f = Parser $ \i -> case i of 
-  (x: xs) -> if f x then Just (x, xs) else Nothing
-  []      -> Nothing
+  (x: xs) -> if f x then Right (x, xs) else Left ()
+  []      -> Left()
+
 pchar                 = pif . (==)
 pword                 = foldr ((>>) . pchar) (pure [])
 pkeyword w τ          = pword w >> pure τ
@@ -379,6 +392,12 @@ nosugar = "(λf:N.(negate f) 5)"
 lettest = "let f:N ≡ 5 in (negate f)"
 letnested = "let f:(N → N) ≡ negate in \nlet n:N ≡ 5 in (f 5)"
 
+parser f msg = Parser p where
+  p (x: xs) = if f x then Right (x, xs) else Left msg
+  p []      = Left msg
+
+myparser = parser isAlpha "This is not an alpha!!!!!!!!!"
+
 main = do
   handle   <- openFile "kane/program.kane" ReadMode
   hSetEncoding handle utf8
@@ -389,3 +408,4 @@ main = do
   print $ run nosugar
   print $ run lettest
   print $ run letnested
+  print $ parse myparser "1four"
