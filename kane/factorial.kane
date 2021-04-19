@@ -1,0 +1,1 @@
+(λn:N.(recnat n 1 λx:N.λy:N.((mul ((add 1) x)) y)) 5)

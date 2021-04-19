@@ -1,0 +1,564 @@
+Notes on reading typing judgments.
+
+Here is an example from this blog post: https://www.hedonisticlearning.com/posts/understanding-typing-judgments.html
+
+Γ,x:τ1 |- e:τ2
+------------------------ -> I
+Γ |- (λx:τ1.e): τ1 -> τ2
+
+Γ |- f:τ1 -> τ2   Γ |- x:τ1
+--------------------------- -> E
+Γ |- fx:τ2
+
+Γ ==> Context
+Σ ==> Signature
+e ==> Term
+τ ==> Type
+
+∴ Γ |-Σ e:τ reads "the expression e has type τ in context Γ given signature Σ"
+
+A rule:
+
+a
+--- -> Name
+b
+
+In this case, the first rule "I" is short for introduction. 
+You read these expressions as if-then statements from top to bottom:
+
+"If above the line then below the line."
+
+OR
+
+"Below the line if above the line."
+
+a => b
+
+If there are multiple judgements on a line, they are logically joined conjunctively:
+
+"If a and b and c then d and e and f"
+
+Types in general are relations that whose terms are derivations or programs that provide
+evidence of the relation. 
+
+BNF for Natural numbers is n,m ::= Z | S n
+
+This translates to the algebraic data type:
+
+data Nat : Set where
+  Z : Nat
+  S : Nat -> Nat
+
+data <= : Nat -> Nat -> Set where
+  Z<=n   : {n : Nat} -> Z <= n
+  Sm<=Sn : {m : Nat} -> {n : Nat} -> m <= n -> (S m) <= (S n)
+
+This datatype is a proof that some Nat is <= some other Nat. Terms of this type guarantee
+the relation/judgement defined by the inductive type itself.
+
+Importatly, in Agda, Z<=n is just an identifier or "name" like "x" or "foo" in other languages.
+Same thing is true for Sm<=Sn which is, again, just a name.
+
+You can construct terms of _isLessThanOrEqqualTo_ by providing a Z and any Nat (Z<=n)
+or by providing two Nats and a proof that the first is less than the second. This provides,
+in turn, a proof that the Successor of m <= Successor of n.
+
+Constructing a proof would look like:
+
+two<=three : (S (S Z)) <= (S (S (S Z)))
+two<=three = Sm<=Sn (Sm<=Sn (Z<=n))
+
+Ok, here is where things get a little weird in the blogpost: The two judgments inductively-defined
+above for terms satisfying <= are written like this in "informal notation".
+
+------ -> Z<=n
+Z <= n
+
+m <= n
+---------- -> Sm<Sn
+S m <= S n
+
+Reading these in english they say "Z is always <= any other natural number" and
+"given that m is <= n, the natural number greater than m is <= the natural number greater than n".
+
+Therefore, our construction of 2<=3 can be written as follows:
+
+---------
+Z<=SZ
+---------
+SZ<=SSZ
+---------
+SSZ<=SSSZ
+
+Again, this says "SSZ<=SSSZ when SZ<=SSZ when Z<=SZ which is always true."
+
+The blogpost then moves to a new example demonstrating big-step operational
+semantics for the untyped lambda calculus. This is a fancy way of saying "the steps to maximally
+reduce any expression in the λ→ to its smallest possible form."
+
+x variable
+v ::= λx.e
+e ::= v | e e | x
+
+mutual
+  data Expr (A : Set) : Set where
+    Val : Value A -> Expr A
+    App : Expr A -> Expr A -> Expr A
+    Var : A -> Expr A
+
+  data Value (A : Set) : Set where
+    Lambda : (A -> Expr A) -> Value A
+
+This definition defines two mutually-inductive data types Expr and Value. Notably, the (A:Set) that is
+left of the : in the declaration of Expr and Value means that A:Set parameterizes the type being defined.
+If it were to appear on the right side of the : it means it indexes the type being defined. 
+
+Let's think about what this means in more familiar language: If we say that we have an array of some type A
+that is passed as an argument to a function, we mean that the return type of the function is parameterized by
+this type "A". However, if we say that the output type is indexed by A we mean that the type being defined
+may be indexed by A. In the world of values, we are saying something like:
+
+fun ∀a : [ a ] -> [ a ]
+fun a = reverse a
+
+Here, the type of the output array depends on or is parameterized by the type of the input a. The output array
+is indexed by an integer meaning that you can get different types out of it by indexing with terms in Integer.
+fun a !! 0 => some a at index 0
+fun a !! 1 => some a at index 1 etc
+
+With types, it's the same idea in that you are saying that different types may be used to index into the output
+type to get back still new types ( or terms for that matter ).
+
+e1 ↓ λx.e   e2 ↓ v2   e[x |-> v2] ↓ v
+------------------------------------- -> App
+e1 e2 ↓ v
+
+----- -> Trivial
+v ↓ v
+
+App says 
+"e1 applied to e2 evaluates to v when 
+  e1 evaluates to λx.e, 
+  e2 evaluates to v2, 
+  and e with x replaced by v2 evaluates to v"
+
+One thing to note here, the clauses may refer to identifiers introduced in other clauses.
+  e2 ↓ v2    and  e[x |-> v2] ↓ v involve the same v2
+  e1 ↓ λx.e  and  e[x |-> v2] ↓ v involve the same e
+
+CExpr : Set1
+CExpr = {A : Set} -> Expr A
+CValue : Set1
+CValue = {A : Set} -> Value A
+
+sub : { A: Set } -> Expr (Expr A) -> Expr A
+sub (Var e ) = e
+sub (Val (Lambda b)) = Val (Lambda (λa -> sub (b (Var a))))
+sub (App e1 e2) = App (sub e1) (sub e2)
+
+data _EvaluatesTo_ : CExpr -> CValue -> Set1 where
+  EvaluateTrivial : 
+       {v : CValue} 
+    -> (Val v) EvaluatesTo v
+  EvaluateApp : 
+       {e1 : CExpr} 
+    -> {e2 : CExpr}
+    -> {e : {A: Set} -> A -> Expr A}
+    -> {v2 : CValue} 
+    -> {v : CValue}
+    -> e1 EvaluatesTo (Lambda e)
+    -> e2 EvaluatesTo v2
+    -> (subst (e (Val v2))) EvaluatesTo v
+    -> (App e1 e2) EvaluatesTo v
+
+Ok, you are probably like me and about ready to freak out. Instead of doing that, let's just work
+through this mess to achieve enlightenment. 
+
+CExpr is a Type that is guaranteed to be an Expr of some Type A.
+CValue is a Type that is guaranteed to be a Value of some Type A.
+
+EvaluatesTo is a type describing the evaluation of some Expression to some Value (it's a "program").
+It defines two constructors: the constructor for trivial values and the constructor for application.
+The trivial constructor implicitly operates on a CValue v and a term of Val v which it then
+returns the v from.
+The application constructor:
+  Implicitly Given e1 e2 as Expressions of a set A
+  Implicitly Given e as a function from an element in a set A to an expression of A
+  Implicitly Given v and v2 as CValues of set A
+  Given proof that e1 EvaluatesTo (Lambda e)
+  Given proof that e2 EvaluatesTo v2
+  Given proof that sub (e (Val v2))) EvaluatesTo v
+  Supply evidence that (App e1 e2) EvaluatesTo v
+
+If we do not have Rules as programs or types but instead as boolean values ( as in classical logic )
+then we could think of a sort of weaker version of this function being implemented "outside the type
+system" in the body of functions. For composing these boolean expressions we may be therefore tempted
+to use something like a Maybe or Either monad instance to capture some notion that each operation
+may succeed or not depending on the value of its Rule.
+
+We can say this in english again to make the point:
+
+Given that e1 and e2 are of the type Expression.
+Given that e is a function from some type to an Expression of that type.
+Given that v and v2 are values of some Type.
+IF e1 EvaluatesTo (Lambda e) AND e2 EvaluatesTo v2 AND sub (e (Val v2)) EvaluatesTo v
+THEN Just v
+ELSE Nothing
+
+In Haskell, this would look something like the following:
+
+Eval :: ∀a => Expr a -> Maybe (Value a)
+Eval (Var)       = ??? not exactly sure ...
+Eval (Val v)     = Just v
+Eval (App e1 e2) = 
+  case (Eval e1, Eval e2) of
+    (Lambda e, v2) -> Just $ sub (e (Val v2))
+    _              -> Nothing
+
+Notice the following: This code uses pattern matching ( and could have used guard clauses ) to represent
+rules whose boolean values are true. The evaluation "continues" so long as the clauses are matched ( true )
+until you reach the innermost statement which you then return as the eval of the original expression.
+
+Let's analyze the typing judgments from the paper, A tutorial implementation of a dependently-typed lambda calculus:
+In the first major section they specify the evaluation judgements for λ→ as well:
+
+e ↓ v
+--------- -> Annotated Term
+e : τ ↓ v
+
+"e of type τ evaluates to v if e evaluates to v"
+
+----- -> Variable
+x ↓ x
+
+"variable x always evaluates to itself"
+
+e ↓ λx.v   v[x |-> e'] ↓ v' 
+-------------------------- -> Lambda Application
+e e' ↓ v'
+
+"e applied to e' evaluates to v' if e evaluates to λx.v and v with all x replaced with e' evaluates to v'"
+
+e ↓ n   e' ↓ v'
+--------------- -> "Failed" application 
+e e' ↓ n v'
+
+"e applied to e' evaluates to n applied to v' if e evaluates to n and e' evaluates to v'"
+
+e ↓ v
+----------- -> Evaluate "under the lambda"
+λx.e ↓ λx.v
+
+"λx.e evaluates to λx.v if e evaluates to v"
+
+In this same section they then specify the typing judgements for the λ→
+
+They start by introducing a data type for contexts:
+Γ ::= ε         empty context
+    | Γ,α : *   adding type identifier
+    | Γ,x : τ   adding term identifier
+
+-------- -> Empty Valid "The empty context is valid always"
+valid(ε)
+
+valid(Γ)
+------------ -> Valid type identifier "the context with a new type identifier is valid if the context is valid"
+valid(Γ,α:*)
+
+valid(Γ)   Γ |- τ:*
+------------------- -> Valid term identifier "context with new term identifier is valid if the context is valid and τ is a type defined in the context"
+valid(Γ,x:τ)
+
+TODO: WTF
+Γ(α) = *
+-------- -> TVar "α in context is a type if the context contains a definition for α that is a type" ...
+Γ |- α:*
+
+Γ |- τ : *   Γ |- τ' : *
+------------------------ -> Fun "τ -> τ' is a type if τ and τ' are both types in the context"
+Γ |- τ -> τ' : *
+
+Finally, they specifiy the type-checking judgements for λ→:
+
+Γ |- τ : *   Γ |- e : τ
+----------------------- -> Ann "e annotated with type τ type τ if the type τ is * and the type e is τ in the context"
+Γ |- (e : τ) : τ
+
+Γ(x) = τ
+---------- -> Var "x has type τ if context for x is τ"
+Γ |- x : τ
+
+Γ |- e : τ -> τ'   Γ |- e' : τ
+------------------------------ -> App "e applied to e' has type τ' if e has type τ -> τ' and e' has type τ in the context"
+Γ |- e e' : τ'
+
+Γ |- e : τ
+---------- -> Check "e has type τ if e is annotated with type τ in the context"
+Γ |- e : τ
+
+Γ,x : τ |- e : τ'
+------------------- -> Lam "Lambda x e has type τ -> τ' if context with x mapping to τ contains e mapping to τ'"
+Γ |- λx.e : τ -> τ'
+
+As is becoming obvious, translating these judgements to english is fairly straightforward once all the syntax is understood.
+The key idea is that rules above each line must hold for the rules below the line to hold. The lowest statement is true IFF
+all statements above it are true.
+
+
+
+MINOR ASIDE ABOUT DEPENDENT TYPES AND QUANTIFIERS
+
+Π(x:A, B(x)) The Dependent Function. 
+Assume B is a function from terms of type A to Types in a Universe U.
+Functions that have a consistent codomain are not dependent on x and are "ordinary functions".
+Given a family of types: B: A -> U we construct Πx:A,B(x)
+In a sense, these model universal quantification. It says ∀x ∈ A, B(x).
+In classical logic, this is a boolean-valued expression that holds for all values x in set A.
+In constructive logic, this is a construction of evidence B(x) for any value of x in type A.
+
+Σ(x:A, B(x)) The Dependent Pair.
+Assume B is a function from terms of type A to Types in a Universe U.
+This is a pair where the second value depends on the first value.
+This is seen as a model of existential quantification. It says ∃x ∈ A, B(x).
+In classical logic, this is a boolean-valued expression that holds for some value x in set A.
+In constructive logic, this is a construction of evidence for a given value x in A and B(x).
+
+Here is an example of existential quantification taken from Wikipedia:
+
+m:N <= n:N <=> ∃k ∈ N.m + k = n
+
+As a dependent pair, this is encoded as follows:
+
+Π(k:N, m + k = n)
+
+It says that the type is inhabited only if there exists a k in N such that m + k = n.
+
+MINOR ASIDE RELATING TO SPECIFYING TIC TAC TOE
+
+This is the code defining possible winning groups in TLA+
+
+RECURSIVE IsomorphismOf(_,_,_)
+IsomorphismOf(m(_,_), A, B) ==
+  \/  /\  A = {}
+      /\  B = {}
+  \/  \E a \in A : 
+      \E b \in B : 
+          /\  m(a,b) 
+          /\  IsomorphismOf(m, A \ {a}, B \ {b})
+
+Groups ==
+  LET WinningCells(S) == 
+    /\  Cardinality(S) = WinningLength
+    /\  \E c \in [ Dimensions -> 0..1 ] :
+        \E o \in [ Dimensions -> -BoardSize..BoardSize ] :
+        \A d \in Dimensions :
+          LET ContinuousLinear(p,t) == p[d] = o[d] + t * c[d]
+              T == 0..(WinningLength - 1)
+          IN  IsomorphismOf(ContinuousLinear, S, T) 
+  IN  { S \in SUBSET CellIndex : WinningCells(S) }
+
+To review, there are two sets: being compared here: 
+  S: Subset (Fin (n - 1)) CellIndex
+  T: Fin (n - 1)
+
+You can construct a set of candidate winning cells by having
+a function f : T -> S that is bijective. The common case of this function
+in classical tic tac toe is f = λt:T.p + o + t * c where p and o and c are
+constants.
+
+We will need a few proofs / programs to get started on this specification:
+
+1. We will need a construction of Subsets of a given cardinality from some original Set.
+2. We will need a construction of finite natural numbers.
+3. We will need a construction of isomorphism between two Sets.
+4. We will need dependent pairs Σ(x:A, B(x)) to encode existential quantification
+5. We will need dependent functions Π(x:A, B(x)) to encode universal quantification
+
+
+Type-checking rules written in a syntax similar to predicate logic.
+
+Γ |- (τ:*) /\ Γ |- (x:τ)          => (x:τ)
+Γ |- (τ:*) /\ Γ |- (e:τ)          => (e:τ):τ
+Γ |- (e:(τ -> τ')) /\ Γ |- (e':τ) => (e e'):τ'
+Γ,(x:τ) |- (e:τ')                 => (λx.e):(τ -> τ') 
+
+l /\ r  both l and r
+l \/ r  either l or r
+Γ,(x:τ) Γ extended with x of type τ
+l |- r  r implied by l
+l -> r  r implied by l
+l => r  r implied by l
+
+The first rule is:
+  (Γ |- (τ:*) /\ Γ |- (x:τ)) => (x:τ)
+This is read in english as follows:
+  "x has type τ when Γ implies τ has type * and Γ implies x has type τ."
+As a requirement of evidence you could also say this:
+  "Evidence that x has type τ is both evidence that τ has type * in Γ and evidence that x has type τ in Γ."
+There are several "variables" introduced in these sentences: x, τ, Γ, *.
+  x this is a symbol that we assert is of type τ
+  τ this is a symbol that we assert is of type *
+  * this is a symbol that stands for all types in the universe
+  Γ this is a symbol that stands for the context in which names are bound to terms
+
+Therefore, our expectations are that the context Γ defined x to be type τ and τ to be type * and that * is
+defined as the type of all types in the universe.
+
+Let's try to comment on the implementation of these rules in a typical programming language:
+Let's imagine we are trying to determine the well-formedness of some expression in our new language:
+
+We want to know the type of some term x that we have encountered in our syntax tree. In order to know 
+its type we must also be given a context that maps x to a type τ and that maps τ to the type *. Slightly
+more formally, the context must define those two typing judgements x:τ and τ:*.
+
+The predicative way of looking at this is that our two typing judgements represent a predicate of the expression
+x that must be checked against some environment to determine if the ultimate judgement x:τ is true.
+
+  (Γ ∈ x:τ /\ Γ ∈ τ:*) => x:τ
+
+In type theory, this is said "Given evidence of x:τ and τ:* in Γ we can construct evidence of x:τ".
+
+When we are checking the above rule, we must be able to model the possibility that the rule is not satisfied.
+That is to say, it is possible that our context will not contain the needed judgements and therefore the type
+judgment x:τ can not be made. This is typically modeled as a monad of two values: success and failure.
+
+Given Γ and e we first pattern match e to find a term which looks like "x":
+  typeCheck Γ e = 
+    case e of (Variable x) -> ...
+We then must check that our required typing judgements are present in the environment:
+  typeCheck Γ e = 
+    case e of (Variable x) -> do                 -- term in question is a Variable
+      τ <- lookup x Γ                            -- x:τ is defined in the context
+      T <- lookup τ Γ                            -- τ:* is defined in the context
+      if T == * then return Just τ else Nothing  -- if τ:* then we are good so return the type as τ
+
+As you can see, the code even in a succinct language like Haskell is a bit ugly but if we try to
+obscure the predicates it arguably becomes a bit more opaque?
+
+TODO: technically, this does not check if x is a variable as the Haskell does through pattern-matching...
+Predicate Logic 
+  tc(Γ, x) = ∃τ ∈ *: (Γ ∈ x:τ /\ Γ ∈ τ:*) => x:τ
+
+Do-notation Haskell
+  tc Γ e = 
+    case e of (Variable x) -> do                 -- term in question is a Variable
+      τ <- lookup x Γ                            -- x:τ is defined in the context
+      T <- lookup τ Γ                            -- τ:* is defined in the context
+      if T == * then return Just τ else Nothing  -- if τ:* then we are good so return the type as τ
+
+Monadic Haskell with lambda abstractions
+  tc Γ (Variable x) = lookup Γ x >>= λτ -> lookup Γ τ >>= λτ' -> iff (τ == *)
+
+Monadic Haskell with un-named lambda abstractions
+  tc Γ (Variable x) = lookup Γ x >>= lookup Γ >>= iff (* ==)
+
+My gut feeling here is that it's likely easiest to read the do-notation Haskell over both of
+the unsugared monadic forms. That being said, the unsugared monadic forms are more concise
+and perhaps make it slightly clearer what the dependencies are in performing the whole rule.
+
+Let's revisit the relationship between evaluation rules of the λcalculus and corrosponding
+data definitions in a DTP.
+
+----- -> Trivial
+v ↓ v
+
+e1 ↓ λx.e   e2 ↓ v2   e[x := v2] ↓ v
+----------------------------------- -> Application
+e1 e2 ↓ v
+
+Firstly, let's observe that these rules have many bound variables that must have appropriate
+types implied by their positions in the rules: v: x, e, e1, e2, v2.
+
+At a glance, it appears that our rules imply:
+  v : { A: Type } -> Value A
+  v2 : { A: Type } -> Value A
+  e : { A: Type } -> A -> Expression A
+  e1 : { A: Type } -> Expression A
+  e2 : { A: Type } -> Expression A
+
+This set of evidence then must satisfy the following rules in order to yield the evidence
+we are looking for: e1 e2 ↓ v
+  e1 ↓ λx.e
+  e2 ↓ v2
+  e v2 ↓ v
+
+data EvaluatesTo : { A: U } -> Expression A -> Value A -> U1 where
+  EvalTrivial : 
+    { v : Value A } -> 
+    (Val v) EvaluatesTo v
+  EvalApplication : 
+    { e1 : Expression A } ->
+    { e2 : Expression A } ->
+    { e : A -> Expression A } ->
+    { v : Value A } ->
+    { v2 : Value A } ->
+    e1 EvaluatesTo (Lambda e) ->
+    e2 EvaluatesTo v2 ->
+    (sub (e (Val v2))) EvaluatesTo v ->
+    (App e1 e2) EvaluatesTo v
+
+When you read this carefully the first thing that pops into your head is "what the fuck is this even saying?"
+You have two constructors for terms of EvaluatesTo: Trivial and Application and somehow the Type of EvaluatesTo
+is a function from Expression A -> Value A -> U1 which is a dorky way of saying that you are given an expression
+a value and you return evidence of their evaluative relationship. Jesus Christ.
+
+I think what this MEANS is that EvaluatesTo is itself a Type/Proof/Program that tells you what some expression
+evaluates to! It sounds so trivial but it's so subtle. Only certain programs are provided that are considered 
+valid proofs of evaluatesTo: Trivial and Application. This means that if you want to actually pass around the
+evaluatesTo relationship as data in your program you will need to construct it from one of the formulas given.
+These formulas in english are something like "EvalTrivial (Val v) is v" and "given that e1 EvaluatesTo (Lambda e) and
+e2 EvaluatesTo v2 and (sub (e (Val v2))) EvaluatesTo v then (App e1 e2) EvaluatesTo v". In other words, to construct
+(App e1 e2) ↓ v you must construct 
+  e1 EvaluatesTo (Lambda e)
+  e2 EvaluatesTo v2
+  sub (e (Val v2)) EvaluatesTo v
+
+To provide these needed proofs, you must use one of your available constructors for EvaluatesTo. EvalTrivial looks
+up to the task:
+
+(λx.0 λx.0) ↓ λx.0
+
+We'd like to construct all the evidence needed to build up this statement.
+
+e = Var 0
+e1 = Val (Lambda (Var 0))
+e2 = Val (Lambda (Var 0))
+v2 = Lambda (Var 0))
+v = Lambda (Var 0)
+
+EvalTrivial for any Val v ≡ v 
+∴ 
+  e1    = λ.0
+  e2    = λ.0
+  e1    ↓ λ.0  -- Needed evidence 1 { e = Var 0 }
+  e2    ↓ λ.0  -- Needed evidence 2 { v2 = Lambda (Var 0) }
+  e v2  ↓ λ.0  -- Needed evidence 3 { v = Lambda (Var 0) }
+
+Thus, given a program at compile-time we can know whether that program has a meaningful evaluation
+under application. It is possible to construct various terms in this type by providing different
+evidences that satisfy the expectations of the EvalApplication constructor. The one shown here is just 
+a single valid instance but indeed there are many, many more ( infinitely ).
+
+
+
+This is our current language:
+
+  (λn:N.(recnat n 1 λx:N.λy:N.((mul ((add 1) x)) y)) 5)
+
+I think for butt-scrapingly-minimal utility, we need a few more things:
+  let bindings or some way to bind names to expressions in a context
+  possibly fix application to be left-associative thus requiring fewer bindings
+  replace Maybe with Either in the parser such that you get parse errors that
+  include the offending issue ( and possibly the line and column number )
+
+  let factorial ≡ λn:N.(recnat n 1 λx:N.λy:N.y * (x + 1)) in
+
+  (factorial 5) + (factorial 6)
+
+This is sugar for the following:
+
+  (λf:(N → N).(f 5) + (f 6)  λn:N.recnat n 1 (λx:N.λy:N.(x + 1) * y))
+
+An aside about mathematical let expressions:
+
+let x:E in F
