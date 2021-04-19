@@ -79,12 +79,12 @@ instance Show T where
 
 
 -- TYPECHECKING
-when b a = if b then Right a else Left ()
+when b a = if b then Right a else Left ""
 
 -- TODO: Could probably make this more elegant mapping from Maybe -> Either
 typeOf env (Var v)              = case Map.lookup v env of
   (Just τ) -> Right τ
-  _        -> Left ()
+  _        -> Left ""
 typeOf env (Bool b)             = return Boolean
 typeOf env (Nat b)              = return NaturalNumber
 typeOf env (Fst (Product τ τ')) = return $ Arrow (Product τ τ') τ
@@ -123,7 +123,7 @@ typeOf env (Partial b l) = case (b, typeOf env l) of
   (Mul, Right NaturalNumber) -> return $ Arrow NaturalNumber NaturalNumber
   (And, Right Boolean)       -> return $ Arrow Boolean Boolean
   (Or,  Right Boolean)       -> return $ Arrow Boolean Boolean
-  _                          -> Left ()
+  _                          -> Left ""
 
 typeOf env (Case l r (Arrow (Sum τ τ') σ)) = do
   let etl = Arrow τ σ
@@ -147,7 +147,7 @@ typeOf env (Pair l r) = do
   τ' <- typeOf env r
   return (Product τ τ')
 
-typeOf env _ = Left ()
+typeOf env _ = Left ""
 
 
 
@@ -222,7 +222,7 @@ instance Monad m => Monad (Parser m) where
   m >>= f  = Parser $ parse m >=> \(l,s') -> parse (f l) s'
 
 instance (Monad m, Alternative m) => Alternative (Parser m) where
-  empty = empty
+  empty   = empty
   a <|> b = Parser $ \s -> parse a s <|> parse b s
 
 instance Alternative (Either a) where
@@ -239,9 +239,9 @@ parse (Parser p) = p
 readChar c = read [ c ]
 
 -- Generic parsers
-pif f = Parser $ \i -> case i of 
-  (x: xs) -> if f x then Right (x, xs) else Left ()
-  []      -> Left()
+pif f = Parser p where
+  p (x: xs) = if f x then Right (x, xs) else Left ""
+  p []      = Left ""
 
 pchar                 = pif . (==)
 pword                 = foldr ((>>) . pchar) (pure [])
@@ -393,10 +393,17 @@ lettest = "let f:N ≡ 5 in (negate f)"
 letnested = "let f:(N → N) ≡ negate in \nlet n:N ≡ 5 in (f 5)"
 
 parser f msg = Parser p where
-  p (x: xs) = if f x then Right (x, xs) else Left msg
-  p []      = Left msg
+  p (x: xs) = if f x then Right (x, xs) else Left (msg x xs)
+  p []      = Left "Nothing to parse."
 
-myparser = parser isAlpha "This is not an alpha!!!!!!!!!"
+expected s x xs = "EXPECTED: " ++ s ++ ". FOUND:" ++ [ x ] ++ ". BEFORE: " ++ take 15 xs ++ "..."
+parseAlpha = parser isAlpha (expected "Alpha")
+parseNumber = parser isNumber (expected "Number")
+parseNumberThenChars = do 
+  a <- parseNumber
+  b <- many parseAlpha 
+  c <- many parseNumber
+  return (a,b,c)
 
 main = do
   handle   <- openFile "kane/program.kane" ReadMode
@@ -408,4 +415,4 @@ main = do
   print $ run nosugar
   print $ run lettest
   print $ run letnested
-  print $ parse myparser "1four"
+  print $ parse parseNumberThenChars "1fourcow9876"
