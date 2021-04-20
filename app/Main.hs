@@ -82,9 +82,6 @@ instance Show T where
 when b a = if b then Right a else Left ""
 
 -- TODO: Could probably make this more elegant mapping from Maybe -> Either
-typeOf env (Var v)              = case Map.lookup v env of
-  (Just τ) -> Right τ
-  _        -> Left ""
 typeOf env (Bool b)             = return Boolean
 typeOf env (Nat b)              = return NaturalNumber
 typeOf env (Fst (Product τ τ')) = return $ Arrow (Product τ τ') τ
@@ -96,6 +93,10 @@ typeOf env (BinaryOp Sub)       = return $ Arrow NaturalNumber (Arrow NaturalNum
 typeOf env (BinaryOp Mul)       = return $ Arrow NaturalNumber (Arrow NaturalNumber NaturalNumber)
 typeOf env (BinaryOp And)       = return $ Arrow Boolean (Arrow Boolean Boolean)
 typeOf env (BinaryOp Or)        = return $ Arrow Boolean (Arrow Boolean Boolean)
+
+typeOf env (Var v) = case Map.lookup v env of
+  (Just τ) -> Right τ
+  _        -> Left ""
 
 typeOf env (RecNat n e f) = do
   NaturalNumber                        <- typeOf env n  
@@ -237,22 +238,30 @@ instance MonadFail (Either a) where
 mkpair a b  = (a,b)
 parse (Parser p) = p
 readChar c = read [ c ]
+expected s x xs = "EXPECTED: " ++ s ++ ". FOUND:" ++ [ x ] ++ ". BEFORE: " ++ take 15 xs ++ "..."
 
 -- Generic parsers
-pif f = Parser p where
-  p (x: xs) = if f x then Right (x, xs) else Left ""
-  p []      = Left ""
+satisfy msg f = Parser p where
+  p (x: xs) = if f x then Right (x, xs) else Left (msg x xs)
+  p []      = Left "Nothing to parse."
+pany = Parser p where
+  p (x:xs) = Right (x, xs)
+  p []     = Left "EXPECTED: Any. ENCOUNTERED: End of input."
+peof = Parser p where
+  p [] = Right ((), "")
+  p xs = Left $ "EXPECTED: End Of File. ENCOUNTERED " ++ take 15 xs ++ "..."
 
-pchar                 = pif . (==)
-pword                 = foldr ((>>) . pchar) (pure [])
-pkeyword w τ          = pword w >> pure τ
-pidentifier           = pif isAlpha
-pnumber               = pif isNumber
+pchar c               = satisfy (expected [ c ]) (c ==)
+pword                 = foldr ((>>) . pchar) (pure ()) 
 p_a_b l a m b f       = l >> a >>= \a' -> m >> b >>= \b' -> return (f a' b')
 p_a_b_ l a m b r f    = l >> a >>= \a' -> m >> b >>= \b' -> r >> return (f a' b')
 p_a_b_c l a m b r c f = l >> a >>= \a' -> m >> b >>= \b' -> r >> c >>= \c' -> return (f a' b' c')
+
+pkeyword w τ          = pword w >> pure τ
+pidentifier           = satisfy (expected "Identifier") isAlpha
+pnumber               = satisfy (expected "Number") isNumber
 pλ                    = pchar 'λ'
-plparen               = pchar '('
+plparen               = pchar '(' 
 prparen               = pchar ')'
 plbracket             = pchar '['
 prbracket             = pchar ']'
@@ -280,8 +289,8 @@ pe
   <|> pinr
   <|> pcase
   <|> pcond <|> pifte
-  <|> papplication
   <|> plambda <|> plet
+  <|> papplication
   <|> pnat
   <|> pbool
   <|> pvar
@@ -307,7 +316,7 @@ pnat         = Nat . readChar <$> pnumber
 pbool        = (pword "True" >> return (Bool True)) <|> (pword "False" >> return (Bool False))
 
 plet = do
-  pchar '\n' <|> pure ' ' 
+  pchar '\n' <|> pure ' ' -- TODO: is this really the right way to do optional?
   pword "let"
   pspace
   v <- pidentifier
@@ -374,45 +383,17 @@ run s = do
   τ       <- typeOf Map.empty t
   return (reduce t, τ)
 
--- experimental and unused substitution syntax
-data Substitution a = (:=) a a
-
-sub :: Substitution Int -> Int -> Int
-sub (a := a') e = if a == e then a' else a
-
-infixl 7 |=> 
-e |=> []     = e
-e |=> (x:xs) = sub x e |=> xs
-
--- just examples of the substitution syntax
-subs = 2 |=> [ 2 := 3, 3 := 4 ]
-mysillyfunc e v e' = e |=> [ v := e' ]
-
 nosugar = "(λf:N.(negate f) 5)"
 lettest = "let f:N ≡ 5 in (negate f)"
 letnested = "let f:(N → N) ≡ negate in \nlet n:N ≡ 5 in (f 5)"
-
-parser f msg = Parser p where
-  p (x: xs) = if f x then Right (x, xs) else Left (msg x xs)
-  p []      = Left "Nothing to parse."
-
-expected s x xs = "EXPECTED: " ++ s ++ ". FOUND:" ++ [ x ] ++ ". BEFORE: " ++ take 15 xs ++ "..."
-parseAlpha = parser isAlpha (expected "Alpha")
-parseNumber = parser isNumber (expected "Number")
-parseNumberThenChars = do 
-  a <- parseNumber
-  b <- many parseAlpha 
-  c <- many parseNumber
-  return (a,b,c)
 
 main = do
   handle   <- openFile "kane/program.kane" ReadMode
   hSetEncoding handle utf8
   contents <- hGetContents handle
-  print contents
+  print $ parse pe contents
   print $ run contents
   hClose handle
   print $ run nosugar
   print $ run lettest
   print $ run letnested
-  print $ parse parseNumberThenChars "1fourcow9876"
