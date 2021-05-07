@@ -1,2 +1,3 @@
 let i:(N → (N → N)) ≡ λx:N.λy:N.((mul ((add 1) x)) y) in 
-let f:(N → N) ≡ λn:N.(recnat n 1 i) in (f 5)
+let f:(N → N) ≡ λn:N.(recnat n 1 i) in 
+(f 5)

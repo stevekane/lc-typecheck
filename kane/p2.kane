@@ -1,0 +1,5 @@
+let c:(N → (N → N)) ≡ λx:N.λy:N.y in
+let j:(N → (N + N)) ≡ λa:N.inr a:(N + N) in
+let n:(N + N)       ≡ inl 0:(N + N) in
+let f:((N + N) → N) ≡ [(c 0),(add 1)]:((N + N) → N) in
+(f (j 5))

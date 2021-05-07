@@ -1,0 +1,242 @@
+Dependent types
+
+  Quantification
+
+    Polymorphism in DTP works as follows:
+
+      id : ∀a.a -> a
+      id = λ(a:*) (x:a) -> x
+
+      id Bool Tree : Bool
+      id Int 3 : Int
+
+    Types and Terms are now both available in the same algebra and are representable as shown above.
+    There is a correspondence between logical quantification ∀ and the Π type in DTP. 
+
+      ∀a ∈ Type.F(a) => Πa:Type F(a)
+
+    The id function therefore is a Π-type that parameterizes a type a:Type and then the function
+    takes a VALUE of that type and returns that value ( with the provided type ):
+
+      id : Πa:U a -> a
+
+    This is sometimes also written using the following less formal notation. The {} mean "forall" and
+    also may denote an implicit parameter ( not explained yet ).
+
+      id : { a: U } -> a -> a
+    
+    We can write the family of Vectors of a given length: Vec a n as an universally quantified expression:
+
+      ∀a:*.∀n:Nat.Vec a n
+
+    The equivalent Type may be written as follows:
+
+      Πa:U Πn:Nat -> Vec a n
+
+    Again, there is a semi-common shorthand for this using {} and combining multiple adjacent parameters:
+
+      { a:U, n:Nat } -> Vec a n
+
+  
+
+  Everything is a term
+
+    In Haskell, Types and Terms exist in different levels and the expression tm :: Ty relates terms in 
+    one level to Types in another.
+
+    In DTP, Types and Terms all exist in the same level (modulo the paradox of Girrard and need for Universes).
+
+    e,ρ,κ 
+      = e:ρ         Annotated term
+      | U           Type of types or Universe0
+      | ∀x:ρ.ρ'     Dependent function space
+      | x           Variable
+      | e e'        Application
+      | λx.e        Lambda abstraction
+
+    e are terms that play the role of terms.
+    ρ are terms that play the role of types.
+    κ are terms that play the role of kinds.
+
+    There is no need for a separate algebra of types as function types and kinds are subsumed under ∀x:ρ.ρ'
+
+
+
+  Evaluation
+
+
+    -----                       "U reduces to itself always"
+    U ↓ U
+
+
+    -----                       "variables reduce to themselves"
+    x ↓ x
+
+    e ↓ v
+    ---------                   "e of type ρ reduces to v if e reduces to v"
+    e : ρ ↓ v
+
+    ρ ↓ τ   ρ' ↓ τ'
+    -----------------           "ρ and ρ' in forall reduce to τ and τ' if ρ reduces to τ and ρ' reduces to τ'"
+    ∀x:ρ.ρ' ↓ ∀x:τ.τ'
+
+    e ↓ λx.v   v[x := e'] ↓ v'
+    --------------------------  "e applied to e' reduces to v' if e reduces to λx.v and v[x := e'] reduces to v'"
+    e e' ↓ v'
+
+    e ↓ n   e' ↓ v'
+    ---------------             "e applied to e' reduces to n applied to v' if e reduces to n and e' reduces to v'""
+    e e' ↓ n v'
+
+    e ↓ v
+    -----------                 "body e of λx.e reduces to v if e reduces to v"
+    λx.e ↓ λx.v
+
+
+
+  Contexts
+
+    Γ 
+      = ε       Empty context
+      | Γ,x:τ   Add a variable
+
+
+    -------- "empty context is valid always"
+    valid(ε)
+
+    valid(Γ)   Γ |- τ:U
+    ------------------- "Γ with new variable x mapping to τ is valid if Γ is valid and τ maps to U in Γ"
+    valid(Γ,x:τ)
+
+    N.B. We always store evaluated types in Γ.
+  
+
+
+  Values
+
+    v, τ
+      = n         Neutral term
+      | U         Type of types
+      | ∀x:τ:τ'   Dependent function space
+      | λx.v      Lambda abstraction
+
+    Evaluation is a function from Expression -> Value | eval : (e -> v)
+  
+    v represents values that play the role of terms.
+    τ represents values that play the role of types.
+
+
+
+  Type System
+
+    Γ |- ρ:U   ρ ↓ τ
+    Γ |- e:τ
+    ---------------- "e annotated with type ρ infers type τ if e has type τ and ρ has type U and ρ evaluates to τ"
+    Γ |- (e:ρ):τ
+
+
+    ---------- "U infers type U always"
+    Γ |- U:U
+
+    Γ |- ρ:U   ρ ↓ τ
+    Γ,x:τ |- ρ':U
+    ----------------- "∀x:ρ.ρ' infers type U if Γ,x:τ contains ρ':U if ρ:U and ρ evaluates to τ"
+    Γ |- ∀x:ρ.ρ':U
+
+      This one is new so we will explain it in more detail. This says that Π(x:ρ) ρ':U when Γ
+      extended with x:τ contains ρ':U and ρ:U and ρ evaluates to τ. In other words, this term is
+      well-typed when the type of the body is a type in U when the assumption x:τ is added and 
+      that the type of first parameter is a Type and that the first parameter evaluates to the 
+      specific type τ.
+
+      (Π(x:ρ.ρ')):U <=> (Γ,x:τ |- ρ':U) /\ (Γ |- ρ:U) /\ (ρ ↓ τ)
+
+    Γ(x) = τ
+    ------------ "x infers type τ if Γ(x) = τ"
+    Γ |- x:τ
+
+    Γ |- e:∀x:τ.τ'   Γ |- e':τ   τ'[x := e'] ↓ τ''
+    ---------------------------------------------- "e applied to e' infers type τ'' if e infers type ∀x:τ.τ' and e' has type τ and
+    Γ |- e e':τ''                                   substituting e' for x in τ' evaluates to τ''"" 
+
+    Γ |- e:τ
+    -------- "e is type τ if e infers type τ"
+    Γ |- e:τ
+
+    Γ,x:τ |- e:τ'
+    ----------------- "λx.e has type ∀x:τ.τ' if Γ extended with x:τ contains e:τ'"
+    Γ |- (λx.e):∀x:τ.τ'
+
+    Type checking takes in a type as an input.
+    Type inference takes in an expression and emits a type.
+
+    The two key takeaways that inform these revised typing rules are: 
+      functions types are generalized to dependent function types
+      kinds are terms
+
+  Implementation
+
+    The paper makes several choice in implementation that I am not taking. I believe that
+    avoiding these choices makes the implementation simpler to understand and detangles it
+    from optimizations that obscure the underlying simple structure of the language.
+
+    Higher-order abstract syntax
+      Treating function types as functions in the host language allows you to use the capture
+      and evaluation semantics of the host language. This means you do not need to write your own
+      substitution algorithm. However, it also is not naturally serializable and thus forces
+      the introduction of Quotation to recover the ability to serialize. Furthermore, this prevents
+      a would-be learner from implementing substition as denoted in literature as:
+
+        e [ x |-> x'] 
+        { x' / x } e
+        e { x / x' }
+      
+      I believe it is more valuable to learn to implement these algorithms to better appreciate
+      what is happening when you are reducing or evaluating a language.
+
+    Inferable and checkable terms enabling optional annotations
+      The paper uses an algebra that mixes together what it calls Checkable and Inferable terms.
+
+        Inferable Terms can be analyzed to yield a type.
+        Checkable Terms require that a type be provided for type-checking.
+
+      The paper points out that one could instead require that all λ terms have explicit types
+      declared for their bound variables thus reducing the algebra to be entirely inferable.
+      They claim that it's convenient to annotate terms at-will and that the ability to leave
+      off annotations on lambda expressions makes the language more expressive and readable.
+      These are reasonable claims but they don't seem sufficient to me to use this less common
+      algebra that introduces more "concepts" which hinder understanding.
+    
+    Explicit algebra of regular and neutral values
+      The paper introduces an algebra of values which it uses to indicate what evaluation produces.
+      That is to say, the type of Evaluation is Term -> Value. Strangely though, this introduction
+      seems to simply boil down to repeating the elements of the original term algebra with slightly
+      different groupings based on whether they are "neutral" or "regular" values. Specifically,
+      the following meanings are given to the expressions found in the terms:
+
+        Regular Value 
+          Lambda String Value Value
+          Universe
+          PI Value Value Value
+
+        Neutral Value
+          Application Value Value
+          Variable String
+
+      This seems like busy work to be brutally honest. It seems much simpler to define evaluation
+      as term re-writing following the evaluation semantics of your choice. This means that the type
+      of Evaluation is Term -> Term with big-step semantics or Term -> Maybe Term with small step
+      semantics. We will use full β-reduction and call-by-value big-step evaluation semantics. This
+      will result in the programs being in normalized form but not evaluating applications that yield
+      free variables or Applications. This is easier to understand and keeps the concepts introduced 
+      to a minimum.
+
+     Mixed representations of bound and free variables
+      The paper elects to use de Bruijn indices to identify variables that are bound by a lambda and String
+      names for free variables. The rationale for these two approaches is something you can explore in 
+      detail on the web. For a reference implementation and tutorial it is simpler to treat all variables
+      simply as strings. Again, the goal is to introduce as few "concepts" into the tutorial as possible.
+
+        As an example, the Haskell function: ```const x y = y``` could be represented in two ways:
+          String variables:   λx.λy.y
+          de Bruijn indices:  λ.λ.0

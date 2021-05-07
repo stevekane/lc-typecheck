@@ -99,7 +99,7 @@ typeOf env (Var v) = case Map.lookup v env of
   _        -> Left ""
 
 typeOf env (RecNat n e f) = do
-  NaturalNumber                        <- typeOf env n  
+  NaturalNumber                        <- typeOf env n
   σ                                    <- typeOf env e
   (Arrow NaturalNumber (Arrow σ' σ'')) <- typeOf env f
   when (σ == σ' && σ == σ'') σ
@@ -252,7 +252,8 @@ peof = Parser p where
   p xs = Left $ "EXPECTED: End Of File. ENCOUNTERED " ++ take 15 xs ++ "..."
 
 pchar c               = satisfy (expected [ c ]) (c ==)
-pword                 = foldr ((>>) . pchar) (pure ()) 
+pword                 = foldr ((>>) . pchar) (pure ())
+optional p            = Just <$> p <|> return Nothing
 p_a_b l a m b f       = l >> a >>= \a' -> m >> b >>= \b' -> return (f a' b')
 p_a_b_ l a m b r f    = l >> a >>= \a' -> m >> b >>= \b' -> r >> return (f a' b')
 p_a_b_c l a m b r c f = l >> a >>= \a' -> m >> b >>= \b' -> r >> c >>= \c' -> return (f a' b' c')
@@ -261,7 +262,7 @@ pkeyword w τ          = pword w >> pure τ
 pidentifier           = satisfy (expected "Identifier") isAlpha
 pnumber               = satisfy (expected "Number") isNumber
 pλ                    = pchar 'λ'
-plparen               = pchar '(' 
+plparen               = pchar '('
 prparen               = pchar ')'
 plbracket             = pchar '['
 prbracket             = pchar ']'
@@ -274,7 +275,7 @@ pperiod               = pchar '.'
 pspace                = pchar ' '
 
 -- Term parsing
-pe  
+pe
   =   pnegate
   <|> pnot
   <|> padd
@@ -316,15 +317,19 @@ pnat         = Nat . readChar <$> pnumber
 pbool        = (pword "True" >> return (Bool True)) <|> (pword "False" >> return (Bool False))
 
 plet = do
-  pchar '\n' <|> pure ' ' -- TODO: is this really the right way to do optional?
+  optional $ many $ pchar '\n'
   pword "let"
   pspace
   v <- pidentifier
   pcolon
   τ <- pType
-  pword " ≡ "
+  optional (many $ pchar ' ')
+  pchar '≡'
+  optional (many $ pchar ' ')
   e <- pe
-  pword " in " 
+  pspace
+  pword "in"
+  al1 (pchar '\n' <|> pchar ' ')
   i <- pe
   return (Apply (Lambda v τ i) e)
 
@@ -352,7 +357,7 @@ pifte = do
   pword ")"
   return (Apply (Apply (Apply (TernaryOp Cond) e) e') b)
 
-precnat = do 
+precnat = do
   plparen
   pword "recnat"
   pspace
@@ -371,11 +376,11 @@ pArrow   = p_a_b_ plparen pType parrow pType prparen Arrow
 pProduct = p_a_b_ plparen pType pcross pType prparen Product
 pSum     = p_a_b_ plparen pType pplus pType prparen Sum
 
-pType 
-  =   pArrow 
-  <|> pProduct 
+pType
+  =   pArrow
+  <|> pProduct
   <|> pSum
-  <|> pBool 
+  <|> pBool
   <|> pNat
 
 run s = do
@@ -387,6 +392,146 @@ nosugar = "(λf:N.(negate f) 5)"
 lettest = "let f:N ≡ 5 in (negate f)"
 letnested = "let f:(N → N) ≡ negate in \nlet n:N ≡ 5 in (f 5)"
 
+s = pchar ' '
+nl = pchar '\n'
+ws = s <|> nl
+ows = optional ws
+al1 p = (:) <$> p <*> many p
+parselet = al1 ws >> pword "let" >> al1 ws >> return "let"
+
+-- fake type and parser to check parsing type aliases
+data TypeVar = TypeVar String T deriving (Show)
+
+atleast1Space = al1 (pchar ' ' <|> pchar '\n')
+plettype = do
+  pword "let"
+  atleast1Space
+  τ <- al1 (satisfy (expected "Type Variable") isAlpha)
+  atleast1Space
+  pchar '≡'
+  atleast1Space
+  τ' <- pType
+  atleast1Space
+  pword "in"
+  atleast1Space
+  return $ TypeVar τ τ'
+
+{-
+There are a few problems we need to solve related to user-defined types.
+
+The first is the ability to define recursive types:
+
+data Tree
+  = Node N Tree Tree
+  | Leaf N
+
+Following our pattern from before we might try to convert it as follows:
+
+let Tree ≡ ((N × (Tree × Tree)) + N) in
+let Node ≡ λx:N.λl:Tree.λr:Tree.(inl (x, (l, r)):Tree) in
+let Leaf ≡ λx:N.(inr x):Tree in
+... program ...
+
+This definition is clearly not adequate as Tree is defined in terms of itself
+( it's a recursive data type so who is really surprised ... ).
+
+Let's think about the definition of primitive recursion over the naturals 
+and see if we can intuit what might be needed to define these recursive structures.
+
+We know that primitive recursion takes a sort of "iterator" which is guaranteed to
+eventually terminate because it takes the value of a natural number always down by one.
+Additionally, we can say that a datatype.
+
+It seems that a definition which is known to never recurse is one in which there are
+no terms in the sum that do NOT contain a reference to the type itself.
+
+Maybe we could invent something...
+
+recnat initialValue base step(n-1, accum)
+
+Basically, we encode the number of times we will recurse statically.
+
+sum = λx.λn.x + n + 1
+recnat 3 0 sum
+
+3 + 2 + 1 = 6
+
+sum 2 (recnat 2 0 sum)
+sum 2 (sum 1 (recnat 1 0 sum))
+sum 2 (sum 1 (sum 0 (recnat 0 0 sum)))
+sum 2 (sum 1 (sum 0 0))
+sum 2 (sum 1 1)
+sum 2 3
+6
+
+Reading a bit about type theory the following claim may be found:
+
+  data List a = Nil | Cons a (List a)
+
+is represented in type theory as:
+
+  λα.μβ.1 + α × β
+    with two constructors
+  nilα      = roll (inl ())
+  consα x l = roll (inr (x,l))
+
+We also find:
+
+  data Nat = Zero | Succ Nat
+
+In type theory:
+
+  nat = μα.1 + α
+
+You read this as:
+  μ denotes a recursive data type
+  α denotes the name of the whole type
+  1 is the unit type representing the constructor Zero that takes no arguments
+  α is the constructor Succ that takes an argument which is the type α itself
+
+We could look at Monomorphic List of Int in the same way:
+
+  data List = Nil | Cons Int List
+
+In type theory, this is represented:
+
+  μα.1 + (Nat × α)
+
+Isorecursive are defined as a relation between 
+  μα.T 
+and its unroll 
+  T[α := μα.T]
+in which the two terms are considered two distinct and disjoint types with 
+special constructs roll and unroll which form an ismorphism between them. 
+  roll:T[α := μα.T] -> μα.T
+  unroll:μα.T -> T[α := μα.T]
+
+Structural recurion vs Generative recursion:
+
+  Generative recursion is a recursive function which invokes itself on 
+  something calculated from some or all of the original input data.
+
+  Structural recursion is a recursive function which invokes itself on
+  a subset of the original input data.
+
+Importantly, all structurally recursive functions on finite data structures can be shown
+to terminate via structural induction. This means that these data structures have a sound 
+and definite type.
+
+Maybe it's not a problem to say the following:
+
+  μMaybe.Nothing | Just N
+
+In type theory, this desugars to the following:
+
+  μMaybe.() + N
+
+If we defined this in our type environment:
+
+  Γ,Maybe:() + N
+-}
+
+
 main = do
   handle   <- openFile "kane/program.kane" ReadMode
   hSetEncoding handle utf8
@@ -397,3 +542,5 @@ main = do
   print $ run nosugar
   print $ run lettest
   print $ run letnested
+  print $ parse parselet "  \nlet\n "
+  print $ parse plettype "let Maybe ≡ (N + N) in "

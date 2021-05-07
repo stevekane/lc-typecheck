@@ -1,4 +1,4 @@
-module Lib where
+module STLambdaCalculus where
 
 -- λ→ from paper
 data CheckableTerm

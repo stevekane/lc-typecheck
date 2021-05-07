@@ -546,9 +546,9 @@ This is our current language:
   (λn:N.(recnat n 1 λx:N.λy:N.((mul ((add 1) x)) y)) 5)
 
 I think for butt-scrapingly-minimal utility, we need a few more things:
-  let bindings or some way to bind names to expressions in a context
-  possibly fix application to be left-associative thus requiring fewer bindings
-  replace Maybe with Either in the parser such that you get parse errors that
+  [-] possibly fix application to be left-associative thus requiring fewer bindings
+  [x] let bindings or some way to bind names to expressions in a context
+  [x] replace Maybe with Either in the parser such that you get parse errors that
   include the offending issue ( and possibly the line and column number )
 
   let factorial ≡ λn:N.(recnat n 1 λx:N.λy:N.y * (x + 1)) in
@@ -559,6 +559,133 @@ This is sugar for the following:
 
   (λf:(N → N).(f 5) + (f 6)  λn:N.recnat n 1 (λx:N.λy:N.(x + 1) * y))
 
-In order to replace Maybe with Either we need to initially make the swap 
-and deal with the errors. Let's start with the stupidest possible Either which is 
-Either () E
+
+
+Let's get some juices flowing about these so-called dependent types.
+
+This is notation for the family of Vector types indexed by a type α and a Nat n.
+
+  ∀α:U.∀n:N.Vec α n
+
+We can type the identity function on these parameterized vectors as follows:
+
+  ∀α:U.∀n:N.∀v:Vec α n.Vec α n
+
+This is pretty hard to read so let's split it up for a moment:
+
+  {α:U} → {n:N} → Vec α n → Vec α n
+
+This is closer to the notation you typically see in languages like IDRIS/AGDA and
+the {} brackets are quantifiers for implicit arguments ( a nicety to reduce visual 
+stimulation to passing around parameters that can be inferred during unification ).
+
+One thing that is observable now is that our type does not depend on the value v. This
+means that our classical → notation may be used to cleanup the signature slightly:
+
+  ∀α:U.∀n:N.Vec α n → Vec α n
+
+Finally, it is traditional notation in type theory to use the Π symbol do denote a 
+dependently-typed function space:
+
+  Πα:U.Πn:N.Vec α n → Vec α n
+
+All these notations are equivalent and what really matters is what they represent.
+
+
+
+Let's think for a moment about what a "data structure" is.
+
+We know that there are three fundamental relations possible in our types:
+  → ==> exponential / implication
+  × ==> product / and
+  + ==> sum / or 
+The only types that can actually be constructed must use these operations
+exclusively.
+
+Let's assume we have three base types:
+  () ==> Unit or the unary type
+  B  ==> Binary or the binary type
+  N  ==> Natural numbers
+
+Let's imagine we wanted to encode the classic "Maybe a" data type from Haskell
+often used to capture the notion of potentially-null values.
+
+Here is the syntax in Haskell:
+
+  data Maybe = Just N | Nothing
+
+If we ignore the names for the moment, this desugars into the following structure:
+
+  m: (() + N)
+
+We can see that the names "Just" "Nothing" and "Maybe" are just sugar for accessing
+structures of this type.
+
+  Maybe   ==> (() + N)
+  Just    ==> λa:N.inr:(() + N).a
+  Nothing ==> inl:(() + N).())
+
+Furthermore, we could think of this as a structural type described exactly as 
+stated above or as a set of substitutions into our program P:
+
+  P [ 
+    Maybe   := (() + N), 
+    Just    := λa:N.inr:(() + N).a,
+    Nothing := inl:(() + N).()
+    ]
+
+Let's write a small program using some of this proposed syntax and transformation:
+
+  let maybesuc ≡ λx:Maybe.([(add 1), const 0]:(Maybe → N) x)
+  in maybesuc (Just 5)
+
+Intuitively, this program compute the result of calling maybesuc with the value (Just 5)
+which should be 6.
+If we desugar this using our transformations from above we should get the following 
+valid program that we can test with the current compiler.
+
+  let maybesuc ≡ [(const 0),(add 1)]:((N + ()) → N) 
+  in maybesuc ((λa:N.inr:(N + ()).a) 5)
+
+Note: if we had better type inference and parsing conventions it could be:
+
+  let maybesuc ≡ [const 0, add 1] in maybesuc (inr 5):(N + N)
+
+Finally, let's observe that IF we could treat types as part of the term language
+( which we currently cannot ) then we could alias the types using a let binding
+and write the following program to encode this transformation for us in the language
+itself.
+
+  let Maybe    ≡ (N + N) in
+  let Just     ≡ λa:N.inr a:Maybe in
+  let Nothing  ≡ inl ():Maybe in
+  let maybesuc ≡ [(const 0), (add 1)]:(Maybe -> N) in
+  
+  (maybesuc (Just 5))
+
+This actually raises an interesting question: Can we add this missing "Maybe" term
+to our language? We could do this by creating an additional environment that contains
+names bound to types but its use would be somewhat different than before: It would
+be used to create type aliases which are essentially types built from type constructors.
+
+We could then perform type-checking by doing the following:
+
+  Γ + (τ:τ') |- τ:τ'
+  ------------------ <- Type checking with aliases
+  Γ |- (e:τ):τ'
+
+This says "e has the type τ' if τ is an alias of type τ' in the same context."
+
+TODO: decide if we're going to add type aliases to the language or not...
+TODO: sort out how nested types "de-sugar" into built-in types:
+  data User
+    = Anonymous N
+    | Registered N B
+    | Verified N
+
+  This should desugar as follows:
+
+  let User                        ≡ (N + ((N × B) + N)) in
+  let Anonymous:(N → User)        ≡ λn:N.inl n:N in
+  let Registered:(N → (B → User)) ≡ λl:N.λr:B.inr inl (l,r):(N × B) in
+  let Verified:(N → User)         ≡ λn:N.inr inr n:N in
